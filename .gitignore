@@ -1,1 +1,86 @@
-phi3env
+# ===== Python =====
+phi3env/
+venv/
+.venv/
+env/
+ENV/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+.eggs/
+build/
+dist/
+pip-wheel-metadata/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+
+# ===== Jupyter / Notebooks =====
+.ipynb_checkpoints/
+*.ipynb_checkpoints
+
+# ===== Environment / Secrets =====
+.env
+.env.*
+*.local
+secrets.json
+config.local.*
+
+# ===== Project runtime data =====
+snapshots/
+logs/
+*.log
+*.tmp
+*.bak
+*.old
+tmp/
+temp/
+
+# ===== Model weights / large files =====
+# (uncomment if you don't want to commit weights)
+# *.pt
+# *.pth
+# *.onnx
+# *.bin
+# *.safetensors
+# *.ckpt
+hf_cache/
+.cache/
+models_cache/
+
+# ===== Node / React =====
+my-react-app/node_modules/
+my-react-app/build/
+my-react-app/.env
+my-react-app/.env.local
+my-react-app/coverage/
+my-react-app/npm-debug.log*
+my-react-app/yarn-debug.log*
+my-react-app/yarn-error.log*
+node_modules/
+package-lock.json.bak
+
+# ===== IDE / Editors =====
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# ===== OS junk =====
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+.AppleDouble
+.LSOverride
