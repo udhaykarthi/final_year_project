@@ -6,6 +6,8 @@ Endpoints:
     POST /analyze        -> capture one webcam frame and return full analysis
     GET  /snapshot/{name}-> serve a captured frame image
     GET  /video_feed     -> MJPEG live preview (optional, used by the React UI)
+    WS   /ws/alerts      -> WebSocket for real-time alerts
+    GET  /stats          -> anomaly detection statistics
 """
 
 import os
@@ -14,7 +16,7 @@ import threading
 import time
 
 import cv2
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 # Make project root importable when running `python api/server.py`
@@ -23,6 +25,7 @@ if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
 from core.pipeline import AnalysisPipeline  # noqa: E402
+from api.websocket_manager import ws_manager  # noqa: E402
 
 
 app = FastAPI(title="Vision Safety API", version="1.0.0")
@@ -60,7 +63,7 @@ def health():
 
 
 @app.post("/analyze")
-def analyze(camera_index: int = 0, location: str = "live_camera"):
+async def analyze(camera_index: int = 0, location: str = "live_camera"):
     try:
         pipeline = get_pipeline()
         with _pipeline_lock:
@@ -69,10 +72,24 @@ def analyze(camera_index: int = 0, location: str = "live_camera"):
                 location=location,
                 camera_index=camera_index,
             )
-        # Add a URL the frontend can use to display the captured frame
+        # Add URLs the frontend can use to display the captured frame
         result["snapshot_url"] = (
             f"/snapshot/{os.path.basename(result['image_path'])}"
         )
+        result["annotated_snapshot_url"] = (
+            f"/annotated/{os.path.basename(result['annotated_image_path'])}"
+        )
+
+        # Broadcast alerts via WebSocket if risk is high
+        if result["risk_score"] >= 5:
+            await ws_manager.send_analysis_result(result)
+            for alert in result.get("alerts", []):
+                await ws_manager.send_alert(
+                    alert_type=alert,
+                    details={"objects": result["objects"], "location": location},
+                    risk_score=result["risk_score"]
+                )
+
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -119,6 +136,43 @@ def video_feed(camera_index: int = 0):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# WebSocket for real-time alerts
+# ---------------------------------------------------------------------------
+@app.websocket("/ws/alerts")
+async def websocket_endpoint(websocket: WebSocket):
+    """WebSocket endpoint for real-time alert notifications."""
+    await ws_manager.connect(websocket)
+    try:
+        while True:
+            # Keep connection alive, receive messages from client
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text("pong")
+    except Exception as e:
+        ws_manager.disconnect(websocket)
+
+
+@app.get("/stats")
+def get_stats():
+    """Get anomaly detection statistics."""
+    pipeline = get_pipeline()
+    return {
+        "anomaly_stats": pipeline.anomaly_detector.get_statistics(),
+        "alert_history": ws_manager.get_alert_history()
+    }
+
+
+@app.get("/annotated/{name}")
+def annotated_snapshot(name: str):
+    """Serve annotated snapshot with bounding boxes."""
+    pipeline = get_pipeline()
+    path = os.path.join(pipeline.annotated_dir, name)
+    if not os.path.isfile(path):
+        raise HTTPException(status_code=404, detail="Annotated snapshot not found")
+    return FileResponse(path, media_type="image/jpeg")
 
 
 if __name__ == "__main__":

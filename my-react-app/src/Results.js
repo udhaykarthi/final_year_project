@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
 import './App.css';
 
@@ -12,6 +12,7 @@ function riskColor(score) {
 export default function Results() {
   const { state } = useLocation();
   const result = state?.result;
+  const [showBoundingBoxes, setShowBoundingBoxes] = useState(true);
 
   if (!result) {
     return (
@@ -26,6 +27,12 @@ export default function Results() {
 
   const apiBase = result.__apiBase || '';
   const snapshot = result.snapshot_url ? `${apiBase}${result.snapshot_url}` : null;
+  const annotatedSnapshot = result.annotated_snapshot_url
+    ? `${apiBase}${result.annotated_snapshot_url}`
+    : null;
+
+  // Use annotated image if available, otherwise fall back to regular snapshot
+  const displayImage = annotatedSnapshot || snapshot;
 
   return (
     <div className="App results-page">
@@ -35,11 +42,48 @@ export default function Results() {
           <Link to="/" className="back-link">← Run again</Link>
         </div>
 
+        {/* Bounding box toggle */}
+        {result.bounding_boxes && result.bounding_boxes.length > 0 && (
+          <div className="bbox-toggle">
+            <label>
+              <input
+                type="checkbox"
+                checked={showBoundingBoxes}
+                onChange={(e) => setShowBoundingBoxes(e.target.checked)}
+              />
+              {' '}Show Bounding Boxes
+            </label>
+          </div>
+        )}
+
         <div className="grid">
           <div className="card">
             <h3>Snapshot</h3>
-            {snapshot ? (
-              <img className="snapshot" src={snapshot} alt="captured frame" />
+            {displayImage ? (
+              <>
+                <img
+                  className="snapshot"
+                  src={showBoundingBoxes && annotatedSnapshot ? annotatedSnapshot : snapshot}
+                  alt="captured frame"
+                />
+                {result.bounding_boxes && result.bounding_boxes.length > 0 && (
+                  <div className="bbox-legend">
+                    <h4>Detected Objects</h4>
+                    <div className="bbox-items">
+                      {result.bounding_boxes.map((box, idx) => (
+                        <div key={idx} className="bbox-item">
+                          <span
+                            className="bbox-color-dot"
+                            style={{ backgroundColor: box.color }}
+                          ></span>
+                          <span className="bbox-label">{box.label}</span>
+                          <span className="bbox-confidence">{(box.confidence * 100).toFixed(1)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
             ) : (
               <p>No snapshot available.</p>
             )}
@@ -76,8 +120,28 @@ export default function Results() {
             )}
           </div>
 
+          {/* Anomalies card - new feature */}
           <div className="card">
-            <h3>Detected Objects</h3>
+            <h3>Anomalies</h3>
+            {result.anomalies && result.anomalies.length > 0 ? (
+              <ul className="anomalies">
+                {result.anomalies.map((a, i) => <li key={i}>🔍 {a}</li>)}
+              </ul>
+            ) : (
+              <p className="ok">✓ No anomalies detected</p>
+            )}
+            {result.anomaly_stats && (
+              <div className="anomaly-stats">
+                <small>
+                  Observations: {result.anomaly_stats.observations} |
+                  Avg Risk: {result.anomaly_stats.avg_risk?.toFixed(1) || 0}
+                </small>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h3>Object Counts</h3>
             {Object.keys(result.object_counts || {}).length === 0 ? (
               <p>None.</p>
             ) : (

@@ -124,3 +124,152 @@ ul { padding-left: 20px; }
     transform: rotate(360deg);
   }
 }
+
+/* Connection status indicator */
+.connection-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 6px 14px;
+  background: #11152e;
+  border-radius: 20px;
+  border: 1px solid #2a335c;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-dot.connected {
+  background: #34c759;
+  box-shadow: 0 0 10px #34c759;
+}
+
+.status-dot.disconnected {
+  background: #ff3b30;
+  box-shadow: 0 0 10px #ff3b30;
+}
+
+.status-text {
+  font-size: 0.85rem;
+  color: #9aa3c7;
+  font-weight: 500;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+/* Live alert notifications */
+.live-alerts {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 1000;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.live-alert-item {
+  background: linear-gradient(135deg, #ff3b30, #ff9500);
+  color: white;
+  padding: 12px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+  box-shadow: 0 6px 20px rgba(255, 59, 48, 0.4);
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes slideIn {
+  from {
+    transform: translateX(100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateX(0);
+    opacity: 1;
+  }
+}
+
+/* Bounding box toggle */
+.bbox-toggle {
+  text-align: center;
+  margin-bottom: 16px;
+}
+
+.bbox-toggle label {
+  color: #9aa3c7;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.bbox-toggle input {
+  margin-right: 8px;
+  accent-color: #6c63ff;
+}
+
+/* Bounding box legend */
+.bbox-legend {
+  margin-top: 12px;
+  padding: 12px;
+  background: #0a0e23;
+  border-radius: 8px;
+  border: 1px solid #1f2750;
+}
+
+.bbox-legend h4 {
+  margin: 0 0 10px;
+  color: #c8cdf0;
+  font-size: 0.9rem;
+}
+
+.bbox-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bbox-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #11152e;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.bbox-color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,0.3);
+}
+
+.bbox-label {
+  color: #f1f1f1;
+  font-weight: 500;
+}
+
+.bbox-confidence {
+  color: #6e779f;
+  font-size: 0.75rem;
+}
+
+/* Anomalies */
+.anomalies li {
+  color: #a78bfa;
+}
+
+.anomaly-stats {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid #1f2750;
+  color: #6e779f;
+}

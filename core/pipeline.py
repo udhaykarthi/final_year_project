@@ -18,6 +18,8 @@ from detectors.object_detector import ObjectDetector
 from core.event_detector import EventDetector
 from core.risk_engine import RiskEngine
 from core.scene_analyzer import SceneAnalyzer
+from core.anomaly_detector import AnomalyDetector
+from core.bounding_box import BoundingBoxAnnotator
 from memory.scene_memory import SceneMemory
 
 
@@ -30,6 +32,8 @@ class AnalysisPipeline:
         self.risk_engine = RiskEngine()
         self.analyzer = SceneAnalyzer()
         self.memory = SceneMemory()
+        self.anomaly_detector = AnomalyDetector()
+        self.box_annotator = BoundingBoxAnnotator(self.detector.model)
 
         self.vision = None
         self.use_vision_model = use_vision_model
@@ -48,7 +52,13 @@ class AnalysisPipeline:
             os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
             "snapshots",
         )
+        self.annotated_dir = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "snapshots",
+            "annotated",
+        )
         os.makedirs(self.snapshot_dir, exist_ok=True)
+        os.makedirs(self.annotated_dir, exist_ok=True)
 
         print("[Pipeline] Ready.")
 
@@ -97,8 +107,10 @@ class AnalysisPipeline:
 
         print(f"[Pipeline] Analyzing: {image_path}")
 
-        # 1. YOLO objects
-        objects = self.detector.detect(image_path)
+        # 1. YOLO objects with bounding boxes
+        objects_with_boxes = self.box_annotator.get_boxes_from_yolo(image_path)
+        objects = [obj["label"] for obj in objects_with_boxes]
+        box_data = [obj for obj in objects_with_boxes]
 
         # 2. Vision-language description (optional)
         description = ""
@@ -117,18 +129,30 @@ class AnalysisPipeline:
         # 5. Risk
         risk = self.risk_engine.calculate(objects, alerts)
 
-        # 6. Memory
+        # 6. Anomaly detection
+        self.anomaly_detector.update(objects, risk["risk_score"])
+        anomalies = self.anomaly_detector.detect_anomalies(objects, risk["risk_score"])
+        anomaly_stats = self.anomaly_detector.get_statistics()
+
+        # 7. Memory
         self.memory.store(location, objects, alerts)
+
+        # 8. Draw bounding boxes on image
+        annotated_path = self._save_annotated_image(image_path, box_data)
 
         result = {
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
             "location": location,
             "image_path": image_path,
+            "annotated_image_path": annotated_path,
             "objects": objects,
             "object_counts": _counts(objects),
+            "bounding_boxes": box_data,
             "description": description,
             "scene": scene,
             "alerts": alerts,
+            "anomalies": anomalies,
+            "anomaly_stats": anomaly_stats,
             "risk_score": risk["risk_score"],
             "risk_reasons": risk["reasons"],
             "history": self.memory.get_history(),
@@ -138,6 +162,21 @@ class AnalysisPipeline:
         _print_result(result)
 
         return result
+
+    def _save_annotated_image(self, image_path: str, box_data: list) -> str:
+        """Save annotated image with bounding boxes."""
+        import shutil
+        from core.bounding_box import BoundingBoxAnnotator
+
+        annotator = BoundingBoxAnnotator()
+        annotated_image, _ = annotator.annotate(image_path, box_data)
+
+        # Generate annotated filename
+        basename = os.path.basename(image_path)
+        annotated_path = os.path.join(self.annotated_dir, f"annotated_{basename}")
+
+        cv2.imwrite(annotated_path, annotated_image)
+        return annotated_path
 
 
 def _counts(items):
