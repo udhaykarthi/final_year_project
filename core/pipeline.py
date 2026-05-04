@@ -20,6 +20,7 @@ from core.risk_engine import RiskEngine
 from core.scene_analyzer import SceneAnalyzer
 from core.anomaly_detector import AnomalyDetector
 from core.bounding_box import BoundingBoxAnnotator
+from core.camera_manager import CameraManager
 from memory.scene_memory import SceneMemory
 
 
@@ -36,16 +37,11 @@ class AnalysisPipeline:
         self.box_annotator = BoundingBoxAnnotator(self.detector.model)
 
         self.vision = None
+        self.vision_error = None
         self.use_vision_model = use_vision_model
 
         if use_vision_model:
-            try:
-                # Lazy import so app can still run without heavy VLM deps
-                from model.vision_qwen import VisionModel
-                self.vision = VisionModel()
-            except Exception as e:
-                print(f"[Pipeline] Vision model disabled: {e}")
-                self.vision = None
+            self._load_vision_model()
 
         # Cache snapshots dir
         self.snapshot_dir = os.path.join(
@@ -63,31 +59,30 @@ class AnalysisPipeline:
         print("[Pipeline] Ready.")
 
     # ------------------------------------------------------------------
-    # Camera capture
+    # Vision model lifecycle
+    # ------------------------------------------------------------------
+    def _load_vision_model(self):
+        try:
+            from model.vision_qwen import VisionModel
+            self.vision = VisionModel()
+            self.vision_error = None
+        except Exception as e:
+            print(f"[Pipeline] Vision model load failed: {e}")
+            self.vision = None
+            self.vision_error = str(e)
+
+    # ------------------------------------------------------------------
+    # Camera capture (uses shared CameraManager - no contention)
     # ------------------------------------------------------------------
     def capture_frame(self, camera_index: int = 0):
-        """Open the webcam, grab a single frame, save it, return path."""
-        cap = cv2.VideoCapture(camera_index, cv2.CAP_DSHOW)
-
-        if not cap.isOpened():
-            cap.release()
-            raise RuntimeError(
-                f"Could not open camera index {camera_index}. "
-                "Check that a webcam is connected and not in use."
-            )
-
-        # Warm-up: some cameras need a few frames before exposure stabilizes
-        frame = None
-        for _ in range(5):
-            ok, frame = cap.read()
-            if not ok:
-                continue
-
-        cap.release()
-
+        """Grab the latest frame from the shared camera and save it."""
+        cam = CameraManager.get(camera_index)
+        frame = cam.get_frame(timeout=3.0)
         if frame is None:
-            raise RuntimeError("Camera opened but failed to read a frame.")
-
+            raise RuntimeError(
+                f"Could not read frame from camera {camera_index}. "
+                "Check that a webcam is connected."
+            )
         ts = time.strftime("%Y%m%d_%H%M%S")
         path = os.path.join(self.snapshot_dir, f"frame_{ts}.jpg")
         cv2.imwrite(path, frame)
@@ -112,13 +107,24 @@ class AnalysisPipeline:
         objects = [obj["label"] for obj in objects_with_boxes]
         box_data = [obj for obj in objects_with_boxes]
 
-        # 2. Vision-language description (optional)
+        # 2. Vision-language description (instruction-tuned)
         description = ""
-        if self.vision is not None:
-            try:
-                description = self.vision.analyze_image(image_path)
-            except Exception as e:
-                description = f"[vision model error: {e}]"
+        vision_status = "ok"
+        if not self.use_vision_model:
+            vision_status = "disabled_by_config"
+        else:
+            # Auto-recover if a previous load failed
+            if self.vision is None:
+                self._load_vision_model()
+            if self.vision is not None:
+                try:
+                    description = self.vision.analyze_image(image_path)
+                except Exception as e:
+                    print(f"[Pipeline] Vision inference failed: {e}")
+                    vision_status = f"error: {e}"
+                    description = ""
+            else:
+                vision_status = f"load_failed: {self.vision_error}"
 
         # 3. Scene parse
         scene = self.analyzer.parse_scene(description or " ".join(objects))
@@ -149,6 +155,7 @@ class AnalysisPipeline:
             "object_counts": _counts(objects),
             "bounding_boxes": box_data,
             "description": description,
+            "vision_status": vision_status,
             "scene": scene,
             "alerts": alerts,
             "anomalies": anomalies,

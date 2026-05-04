@@ -59,8 +59,7 @@ models_cache/
 # ===== Node / React =====
 my-react-app/node_modules/
 my-react-app/build/
-my-react-app/.env
-my-react-app/.env.local
+
 my-react-app/coverage/
 my-react-app/npm-debug.log*
 my-react-app/yarn-debug.log*

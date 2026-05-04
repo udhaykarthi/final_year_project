@@ -1,6 +1,6 @@
 # New Enhancements
 
-Three major features added to the Vision Safety System:
+Three major features added to the Rov-E system:
 
 ---
 

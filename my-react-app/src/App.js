@@ -1,136 +1,151 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import './App.css';
+import { api, API_BASE } from './auth';
 
-const API_BASE = process.env.REACT_APP_API_BASE || 'http://localhost:8000';
-const WS_BASE = API_BASE.replace('http://', 'ws://').replace('https://', 'ws://');
+const WS_BASE = API_BASE.replace(/^http/, 'ws');
 
-function App() {
+export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [liveAlerts, setLiveAlerts] = useState([]);
+  // Cache-buster used to force the MJPEG <img> to (re)connect on demand.
+  const [streamKey, setStreamKey] = useState(() => Date.now());
+  const [streamOk, setStreamOk] = useState(true);
   const navigate = useNavigate();
+  const imgRef = useRef(null);
 
-  // WebSocket connection for real-time alerts
+  // ----- WebSocket alerts -----
   useEffect(() => {
-    let ws = null;
+    let ws;
     try {
       ws = new WebSocket(`${WS_BASE}/ws/alerts`);
-
-      ws.onopen = () => {
-        console.log('[WebSocket] Connected');
-        setWsConnected(true);
-      };
-
+      ws.onopen = () => setWsConnected(true);
+      ws.onclose = () => setWsConnected(false);
+      ws.onerror = () => setWsConnected(false);
       ws.onmessage = (event) => {
         try {
           const data = JSON.parse(event.data);
           if (data.type === 'alert') {
-            // Add live alert notification
-            setLiveAlerts(prev => [
-              { id: Date.now(), ...data },
-              ...prev.slice(0, 4) // Keep last 5 alerts
-            ]);
-            // Auto-remove after 5 seconds
+            const id = Date.now() + Math.random();
+            setLiveAlerts((prev) => [{ id, ...data }, ...prev.slice(0, 4)]);
             setTimeout(() => {
-              setLiveAlerts(prev => prev.filter(a => a.id !== data.timestamp));
-            }, 5000);
+              setLiveAlerts((prev) => prev.filter((a) => a.id !== id));
+            }, 6000);
           }
-        } catch (e) {
-          console.error('WebSocket parse error:', e);
-        }
+        } catch {}
       };
+    } catch {}
+    return () => ws && ws.close();
+  }, []);
 
-      ws.onclose = () => {
-        console.log('[WebSocket] Disconnected');
-        setWsConnected(false);
-      };
-
-      ws.onerror = (err) => {
-        console.error('[WebSocket] Error:', err);
-        setWsConnected(false);
-      };
-
-    } catch (e) {
-      console.error('WebSocket connection failed:', e);
-    }
-
+  // ----- Live stream auto-recovery -----
+  // 1. Restart stream whenever the page becomes visible again (tab focus / route change).
+  useEffect(() => {
+    const restart = () => setStreamKey(Date.now());
+    window.addEventListener('focus', restart);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') restart();
+    });
     return () => {
-      if (ws) ws.close();
+      window.removeEventListener('focus', restart);
     };
   }, []);
 
+  // 2. If the stream errors, retry every 2 seconds until it loads.
+  useEffect(() => {
+    if (streamOk) return;
+    const t = setInterval(() => setStreamKey(Date.now()), 2000);
+    return () => clearInterval(t);
+  }, [streamOk]);
+
+  const reloadStream = () => {
+    setStreamOk(true);
+    setStreamKey(Date.now());
+  };
+
+  // ----- Detection -----
   const runDetection = async () => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_BASE}/analyze`, { method: 'POST' });
-      if (!res.ok) {
-        const t = await res.text();
-        throw new Error(`HTTP ${res.status}: ${t}`);
-      }
-      const data = await res.json();
+      const data = await api('/analyze', { method: 'POST' });
       data.__apiBase = API_BASE;
       navigate('/results', { state: { result: data } });
     } catch (e) {
-      setError(e.message || String(e));
+      setError(e.message);
     } finally {
       setLoading(false);
+      // Force the live stream to reconnect after analyze finishes
+      setStreamKey(Date.now());
     }
   };
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>🛡️ Vision Safety System</h1>
-        <p className="subtitle">
-          Real-time webcam scene analysis powered by YOLO + Qwen-VL
-        </p>
-
-        {/* Connection status */}
-        <div className="connection-status">
-          <span className={`status-dot ${wsConnected ? 'connected' : 'disconnected'}`}></span>
-          <span className="status-text">{wsConnected ? 'Live' : 'Offline'}</span>
+    <div className="page">
+      <div className="page-header">
+        <div>
+          <h1>Live camera</h1>
+          <p className="muted">
+            Real-time webcam scene analysis powered by YOLO + Qwen2-VL.
+          </p>
         </div>
+        <div className={`status-pill ${wsConnected ? 'on' : 'off'}`}>
+          <span className="dot" />
+          {wsConnected ? 'Live alerts on' : 'Alerts offline'}
+        </div>
+      </div>
 
-        {/* Live alert notifications */}
-        {liveAlerts.length > 0 && (
-          <div className="live-alerts">
-            {liveAlerts.map(alert => (
-              <div key={alert.id} className="live-alert-item">
-                ⚠️ {alert.alert_type} (Risk: {alert.risk_score}/10)
-              </div>
-            ))}
-          </div>
-        )}
+      {liveAlerts.length > 0 && (
+        <div className="live-alerts">
+          {liveAlerts.map((a) => (
+            <div key={a.id} className="live-alert-item">
+              ⚠ {a.alert_type} — risk {a.risk_score}/10
+            </div>
+          ))}
+        </div>
+      )}
 
+      <div className="card">
         <div className="preview-card">
           <img
+            ref={imgRef}
+            key={streamKey}
             className="preview"
-            src={`${API_BASE}/video_feed`}
+            src={`${API_BASE}/video_feed?t=${streamKey}`}
             alt="Live camera feed"
-            onError={(e) => { e.target.style.display = 'none'; }}
+            onLoad={() => setStreamOk(true)}
+            onError={() => setStreamOk(false)}
           />
+          {!streamOk && (
+            <div className="preview-overlay">
+              <div>Reconnecting to camera…</div>
+              <button className="btn btn-ghost small" onClick={reloadStream}>
+                Retry now
+              </button>
+            </div>
+          )}
         </div>
 
-        <button
-          className="run-btn"
-          onClick={runDetection}
-          disabled={loading}
-        >
-          {loading ? '🔍 Analyzing...' : '▶ Run Detection'}
-        </button>
+        <div className="actions-row">
+          <button
+            className="btn btn-primary big"
+            onClick={runDetection}
+            disabled={loading}
+          >
+            {loading ? 'Analyzing…' : '▶ Run detection'}
+          </button>
+          <button className="btn btn-ghost" onClick={reloadStream}>
+            ↻ Reconnect feed
+          </button>
+          {error && <p className="error">{error}</p>}
+        </div>
 
-        {error && <p className="error">⚠ {error}</p>}
-
-        <p className="hint">
-          Make sure the API is running:&nbsp;
-          <code>python api/server.py</code>
+        <p className="muted small">
+          The live feed automatically reconnects when you return to this page
+          or after a detection finishes.
         </p>
-      </header>
+      </div>
     </div>
   );
 }
-
-export default App;
