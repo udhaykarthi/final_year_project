@@ -5,7 +5,6 @@ import { api, API_BASE } from './auth';
 const WS_BASE = API_BASE.replace(/^http/, 'ws');
 
 export default function App() {
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [wsConnected, setWsConnected] = useState(false);
   const [liveAlerts, setLiveAlerts] = useState([]);
@@ -65,20 +64,11 @@ export default function App() {
   };
 
   // ----- Detection -----
-  const runDetection = async () => {
-    setLoading(true);
+  // Don't block the live page. Navigate to /results immediately and let that
+  // page run the analysis + show its own loading state.
+  const runDetection = () => {
     setError(null);
-    try {
-      const data = await api('/analyze', { method: 'POST' });
-      data.__apiBase = API_BASE;
-      navigate('/results', { state: { result: data } });
-    } catch (e) {
-      setError(e.message);
-    } finally {
-      setLoading(false);
-      // Force the live stream to reconnect after analyze finishes
-      setStreamKey(Date.now());
-    }
+    navigate('/results', { state: { pending: true, startedAt: Date.now() } });
   };
 
   return (
@@ -131,9 +121,8 @@ export default function App() {
           <button
             className="btn btn-primary big"
             onClick={runDetection}
-            disabled={loading}
           >
-            {loading ? 'Analyzing…' : '▶ Run detection'}
+            ▶ Run detection
           </button>
           <button className="btn btn-ghost" onClick={reloadStream}>
             ↻ Reconnect feed

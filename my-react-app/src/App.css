@@ -471,3 +471,20 @@ pre.history {
   overflow: auto;
   color: var(--text);
 }
+/* ===== Loading spinner (Results page pending state) ===== */
+.loading-card {
+  padding: 60px 30px;
+}
+.spinner {
+  width: 56px;
+  height: 56px;
+  border: 4px solid rgba(34, 211, 238, 0.15);
+  border-top-color: #22d3ee;
+  border-radius: 50%;
+  margin: 0 auto 18px;
+  animation: spin 0.9s linear infinite;
+  box-shadow: 0 0 18px rgba(34, 211, 238, 0.35);
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

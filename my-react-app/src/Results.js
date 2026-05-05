@@ -1,6 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useLocation, Link } from 'react-router-dom';
+import { api, API_BASE } from './auth';
 import './App.css';
+
+const STORAGE_KEY = 'rove:lastResult';
 
 function riskColor(score) {
   if (score >= 8) return '#c0392b';
@@ -9,10 +12,117 @@ function riskColor(score) {
   return '#2e7d32';
 }
 
+// Fetch a remote image and convert it to a base64 data URL so we can persist
+// it in localStorage and display it without needing the backend afterwards.
+async function urlToDataUrl(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    return await new Promise((resolve) => {
+      const fr = new FileReader();
+      fr.onloadend = () => resolve(fr.result);
+      fr.onerror = () => resolve(null);
+      fr.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
+function persistResult(result) {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(result));
+  } catch {
+    // Quota exceeded -> drop embedded images and retry.
+    try {
+      const { snapshot_data, annotated_data, ...rest } = result;
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(rest));
+    } catch {}
+  }
+}
+
+function loadCachedResult() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
 export default function Results() {
   const { state } = useLocation();
-  const result = state?.result;
+  const initialResult = state?.result || null;
+  const pending = !!state?.pending && !initialResult;
+
+  const [result, setResult] = useState(initialResult);
+  const [loading, setLoading] = useState(pending);
+  const [error, setError] = useState(null);
   const [showBoxes, setShowBoxes] = useState(true);
+  const startedRef = useRef(false);
+
+  // Run analysis on mount when navigated with `pending` flag
+  useEffect(() => {
+    if (!pending || startedRef.current) return;
+    startedRef.current = true;
+    (async () => {
+      try {
+        const data = await api('/analyze', { method: 'POST' });
+        data.__apiBase = API_BASE;
+        const snapUrl = data.snapshot_url ? `${API_BASE}${data.snapshot_url}` : null;
+        const annUrl = data.annotated_snapshot_url
+          ? `${API_BASE}${data.annotated_snapshot_url}`
+          : null;
+        const [snapData, annData] = await Promise.all([
+          snapUrl ? urlToDataUrl(snapUrl) : Promise.resolve(null),
+          annUrl ? urlToDataUrl(annUrl) : Promise.resolve(null),
+        ]);
+        if (snapData) data.snapshot_data = snapData;
+        if (annData) data.annotated_data = annData;
+        persistResult(data);
+        setResult(data);
+      } catch (e) {
+        setError(e.message || String(e));
+      } finally {
+        setLoading(false);
+      }
+    })();
+  }, [pending]);
+
+  // Fallback: load cached result when arriving without state
+  useEffect(() => {
+    if (result || loading) return;
+    const cached = loadCachedResult();
+    if (cached) setResult(cached);
+  }, [result, loading]);
+
+  if (loading) {
+    return (
+      <div className="page">
+        <div className="card center-text loading-card">
+          <div className="spinner" />
+          <h2>Analyzing scene…</h2>
+          <p className="muted">
+            Capturing frame, running YOLO detection and Qwen2-VL reasoning.
+            This usually takes a few seconds.
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="page">
+        <div className="card">
+          <h2>Detection failed</h2>
+          <p className="error">{error}</p>
+          <Link className="btn btn-primary" to="/live">← Back to Live</Link>
+        </div>
+      </div>
+    );
+  }
 
   if (!result) {
     return (
@@ -25,11 +135,15 @@ export default function Results() {
     );
   }
 
-  const apiBase = result.__apiBase || '';
-  const snapshot = result.snapshot_url ? `${apiBase}${result.snapshot_url}` : null;
-  const annotated = result.annotated_snapshot_url
-    ? `${apiBase}${result.annotated_snapshot_url}`
-    : null;
+  const apiBase = result.__apiBase || API_BASE || '';
+  const snapshot =
+    result.snapshot_data ||
+    (result.snapshot_url ? `${apiBase}${result.snapshot_url}` : null);
+  const annotated =
+    result.annotated_data ||
+    (result.annotated_snapshot_url
+      ? `${apiBase}${result.annotated_snapshot_url}`
+      : null);
   const displayImage = (showBoxes && annotated) ? annotated : snapshot;
 
   return (
